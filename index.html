@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Earth Jukebox: hear NASA satellite maps</title>
+<style>
+:root{
+  --bg:#E8EEF2; --surface:#F7FAFC; --ink:#13293D; --muted:#4D6375; --line:#C4D1DB;
+  --signal:#E0A100; --field:#FFFFFF; --left:#2F6FB0; --right:#B8346B; --err:#A3262A;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0D1A26; --surface:#132536; --ink:#E3EBF1; --muted:#97ADBF; --line:#28405A;
+    --signal:#F2B705; --field:#0F2030; --left:#79B0EA; --right:#EE7BA8; --err:#FF8A8A;
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:28px 20px 40px}
+h1{font-family:"Avenir Next","Avenir","Futura","Trebuchet MS",sans-serif;font-weight:700;font-size:clamp(2.1rem,4.6vw,3.3rem);letter-spacing:-.02em;line-height:1.02;margin:0 0 8px}
+.lede{margin:0;color:var(--muted);max-width:64ch}
+.layout{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(270px,1fr);gap:24px;margin-top:24px;align-items:start}
+@media(max-width:880px){.layout{grid-template-columns:1fr}}
+.stage{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px}
+.views{display:grid;gap:10px}
+.view{position:relative;border-radius:10px;overflow:hidden;background:#0A1622;min-height:120px}
+.view canvas{display:block;width:100%;height:auto}
+.view canvas.overlay{position:absolute;inset:0;width:100%;height:100%}
+.view .ear{position:absolute;top:8px;left:8px;font-size:.82rem;padding:2px 10px;border-radius:999px;background:rgba(8,18,28,.72);color:#fff}
+.view .ear[data-side="left"]{box-shadow:inset 3px 0 0 var(--left)}
+.view .ear[data-side="right"]{box-shadow:inset 3px 0 0 var(--right)}
+.view .empty{position:absolute;inset:0;display:grid;place-items:center;color:#C9D6E0;text-align:center;padding:20px}
+.now{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;align-items:baseline;margin:14px 2px 6px}
+.now .date{font-family:"Avenir Next","Avenir","Futura",sans-serif;font-weight:700;font-size:1.7rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.now .detail{color:var(--muted)}
+@media(max-width:560px){.now{grid-template-columns:1fr}}
+#spark{display:block;width:100%;height:70px;cursor:pointer;border-top:1px solid var(--line);margin-top:8px}
+.controls{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center;margin-top:12px}
+button{font:inherit;cursor:pointer;border-radius:999px;border:1px solid var(--ink);background:transparent;color:var(--ink);padding:.5rem 1.1rem;font-weight:600}
+button.primary{background:var(--ink);color:var(--bg);min-width:6.5rem}
+button[aria-pressed="true"]{background:var(--signal);border-color:var(--signal);color:#1A1300}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,select:focus-visible,input:focus-visible,#spark:focus-visible{outline:3px solid var(--signal);outline-offset:2px}
+.range{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:.92rem}
+.range input{width:110px;accent-color:var(--signal)}
+aside{display:grid;gap:18px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px}
+.panel h2{font-size:1.05rem;margin:0 0 10px}
+label{display:block;font-size:.9rem;color:var(--muted);margin:10px 0 4px}
+select,input[type=text],input[type=date]{width:100%;font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:8px;padding:.45rem .6rem}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.load{margin-top:14px;width:100%}
+progress{width:100%;margin-top:10px;accent-color:var(--signal)}
+.status{font-size:.9rem;color:var(--muted);margin:8px 0 0;min-height:1.2em}
+.error{color:var(--err);font-size:.92rem;margin:8px 0 0}
+.howto{margin:0;padding-left:1.1rem;color:var(--muted);font-size:.94rem}
+.howto li{margin:4px 0}
+.howto strong{color:var(--ink);font-weight:600}
+footer{margin-top:28px;color:var(--muted);font-size:.88rem;max-width:80ch}
+footer a{color:inherit}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Earth Jukebox</h1>
+    <p class="lede">NASA satellite maps, played as music. A line sweeps across each map and whatever sits under it becomes the melody. Put on headphones: west is your left ear, east is your right.</p>
+  </header>
+
+  <div class="layout">
+    <section class="stage" aria-label="Player">
+      <div class="views">
+        <div class="view" id="viewA">
+          <canvas class="base"></canvas><canvas class="overlay" aria-hidden="true"></canvas>
+          <span class="ear" data-side="left" hidden></span>
+          <div class="empty" id="emptyMsg">Loading NASA maps…</div>
+        </div>
+        <div class="view" id="viewB" hidden>
+          <canvas class="base"></canvas><canvas class="overlay" aria-hidden="true"></canvas>
+          <span class="ear" data-side="right"></span>
+        </div>
+      </div>
+
+      <div class="now" aria-live="polite">
+        <div class="date" id="nowDate">&nbsp;</div>
+        <div class="detail" id="nowDetail">Press Play to hear the first map.</div>
+      </div>
+
+      <canvas id="spark" tabindex="0" aria-label="Average value of each map over time. Click a point to jump to that map."></canvas>
+
+      <div class="controls">
+        <button class="primary" id="playBtn" disabled>Play</button>
+        <button id="cmpBtn" aria-pressed="false" disabled title="First map in your left ear, last map in your right">Compare first and last</button>
+        <div class="range"><label for="speed" style="margin:0">Speed</label><input id="speed" type="range" min="70" max="220" value="150"></div>
+        <div class="range"><label for="vol" style="margin:0">Volume</label><input id="vol" type="range" min="0" max="100" value="75"></div>
+      </div>
+    </section>
+
+    <aside>
+      <div class="panel">
+        <h2>Choose the maps</h2>
+        <label for="preset">Story</label>
+        <select id="preset"></select>
+        <label for="layer">GIBS layer ID</label>
+        <input id="layer" type="text" spellcheck="false" autocomplete="off">
+        <label for="region">Region</label>
+        <select id="region"></select>
+        <div class="row">
+          <div><label for="start">From</label><input id="start" type="date"></div>
+          <div><label for="end">To</label><input id="end" type="date"></div>
+        </div>
+        <div class="row">
+          <div><label for="step">One map per</label>
+            <select id="step"><option value="month">Month</option><option value="year">Year</option></select></div>
+          <div><label for="mode">Melody follows</label>
+            <select id="mode">
+              <option value="brightness">Brightness</option>
+              <option value="warmth">Color warmth</option>
+              <option value="coverage">How much is covered</option>
+            </select></div>
+        </div>
+        <button class="primary load" id="loadBtn">Load maps</button>
+        <progress id="prog" value="0" max="1" hidden></progress>
+        <p class="status" id="status"></p>
+        <p class="error" id="error" role="alert"></p>
+      </div>
+
+      <div class="panel">
+        <h2>How to listen</h2>
+        <ul class="howto">
+          <li><strong>Melody:</strong> the strip under the line. Higher note means brighter, warmer, or more covered, depending on your setting.</li>
+          <li><strong>Left to right:</strong> the line moves west to east, and so does the sound.</li>
+          <li><strong>Low drone:</strong> the whole map's average. It shifts when the map changes.</li>
+          <li><strong>Compare:</strong> first map in your left ear, last map in your right, playing together.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    Imagery from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System. Sound is generated in your browser from the colors of each map image, so readings are indexes of the map's colors, not calibrated science values. Find more layer IDs in the <a href="https://nasa-gibs.github.io/gibs-api-docs/" target="_blank" rel="noopener">GIBS docs</a> or <a href="https://worldview.earthdata.nasa.gov/" target="_blank" rel="noopener">Worldview</a>.
+  </footer>
+</div>
+
+<script>
+// ---------- Config ----------
+const GIBS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
+const STEPS = 16;          // strips per map = notes per map
+const MAX_FRAMES = 36;
+
+const REGIONS = {
+  global:   {name:'The whole Earth',       bbox:[-180,-90,180,90]},
+  arctic:   {name:'The Arctic',            bbox:[-180,55,180,90]},
+  antarctic:{name:'Antarctica',            bbox:[-180,-90,180,-55]},
+  africa:   {name:'Africa',                bbox:[-20,-36,55,38]},
+  samerica: {name:'South America',         bbox:[-85,-56,-32,14]},
+  namerica: {name:'North America',         bbox:[-170,15,-50,75]},
+  europe:   {name:'Europe',                bbox:[-25,34,45,72]},
+  india:    {name:'India and the Himalaya',bbox:[65,5,100,38]},
+  australia:{name:'Australia',             bbox:[110,-45,156,-9]},
+};
+
+const PRESETS = {
+  sst:   {label:'Ocean temperature through 2024', layer:'GHRSST_L4_MUR_Sea_Surface_Temperature', region:'global', start:'2024-01-15', end:'2024-12-15', step:'month', mode:'warmth'},
+  fires: {label:"Africa's fire season, month by month", layer:'VIIRS_SNPP_Thermal_Anomalies_375m_All', region:'africa', start:'2024-01-15', end:'2024-12-15', step:'month', mode:'coverage'},
+  ice:   {label:'Arctic sea ice, every September', layer:'AMSRU2_Sea_Ice_Concentration_12km', region:'arctic', start:'2013-09-15', end:'2025-09-15', step:'year', mode:'coverage'},
+  snow:  {label:'Snow across North America, 2024', layer:'MODIS_Terra_NDSI_Snow_Cover', region:'namerica', start:'2024-01-15', end:'2024-12-15', step:'month', mode:'brightness'},
+  clouds:{label:'Monsoon clouds over India, 2024', layer:'MODIS_Terra_CorrectedReflectance_TrueColor', region:'india', start:'2024-01-15', end:'2024-12-15', step:'month', mode:'brightness'},
+  custom:{label:'Your own layer'},
+};
+
+const MODES = {
+  brightness:{reading:'Brightness index'},
+  warmth:    {reading:'Warmth index'},
+  coverage:  {reading:'Map covered'},
+};
+
+// A minor pentatonic, three octaves from A3, for the melody; A1–A2 for the drone
+const PENTA = [0,3,5,7,10];
+const SCALE = []; for(let o=0;o<3;o++) for(const s of PENTA) SCALE.push(220*Math.pow(2,(s+12*o)/12)); SCALE.push(1760);
+const DRONE = [0,3,5,7,10,12].map(s=>55*Math.pow(2,s/12));
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+const els = {preset:$('preset'),layer:$('layer'),region:$('region'),start:$('start'),end:$('end'),step:$('step'),mode:$('mode'),
+  loadBtn:$('loadBtn'),prog:$('prog'),status:$('status'),error:$('error'),playBtn:$('playBtn'),cmpBtn:$('cmpBtn'),
+  speed:$('speed'),vol:$('vol'),nowDate:$('nowDate'),nowDetail:$('nowDetail'),spark:$('spark'),emptyMsg:$('emptyMsg')};
+const views = ['viewA','viewB'].map(id=>{const v=$(id);return{el:v,base:v.querySelector('.base'),overlay:v.querySelector('.overlay'),ear:v.querySelector('.ear')};});
+
+for(const [k,p] of Object.entries(PRESETS)) els.preset.add(new Option(p.label,k));
+for(const [k,r] of Object.entries(REGIONS)) els.region.add(new Option(r.name,k));
+function applyPreset(k){const p=PRESETS[k]; if(!p.layer) return; els.layer.value=p.layer; els.region.value=p.region; els.start.value=p.start; els.end.value=p.end; els.step.value=p.step; els.mode.value=p.mode;}
+els.preset.addEventListener('change',()=>{applyPreset(els.preset.value); if(els.preset.value==='custom') els.layer.focus();});
+['layer','region','start','end','step','mode'].forEach(id=>els[id].addEventListener('input',()=>{ if(els.preset.value!=='custom' && !matchesPreset()) els.preset.value='custom'; }));
+function matchesPreset(){const p=PRESETS[els.preset.value]; return p && p.layer===els.layer.value.trim() && p.region===els.region.value && p.start===els.start.value && p.end===els.end.value && p.step===els.step.value && p.mode===els.mode.value;}
+
+// ---------- State ----------
+let frames=[], cfg=null, norm=null, W=512, H=256, basemap=null, sparse=false;
+let ctx=null, bus=null, master=null, drones=[], noiseBuf=null;
+let playing=false, compare=false, frameIdx=0, step=0, nextTime=0, timer=null, visQ=[], lastDrawnFrame=-1, lastCaption='';
+
+// ---------- Helpers ----------
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const pad=n=>String(n).padStart(2,'0');
+const daysIn=(y,m)=>new Date(Date.UTC(y,m,0)).getUTCDate();
+const fmtDate=s=>new Date(s+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+const stepDur=()=>60/Number(els.speed.value)/2;
+
+function dateSeq(start,end,stepKind){
+  const [sy,sm,sd]=start.split('-').map(Number); const out=[]; let y=sy,m=sm;
+  while(out.length<500){
+    const s=`${y}-${pad(m)}-${pad(Math.min(sd,daysIn(y,m)))}`;
+    if(s>end) break; out.push(s);
+    if(stepKind==='year') y++; else {m++; if(m>12){m=1;y++;}}
+  }
+  return out;
+}
+function wmsURL(layer,bbox,w,h,time){
+  const p=new URLSearchParams({SERVICE:'WMS',VERSION:'1.1.1',REQUEST:'GetMap',LAYERS:layer,STYLES:'',SRS:'EPSG:4326',BBOX:bbox.join(','),WIDTH:w,HEIGHT:h,FORMAT:'image/png',TRANSPARENT:'TRUE'});
+  if(time) p.set('TIME',time);
+  return GIBS+'?'+p.toString();
+}
+function sizeFor(bbox){
+  const dLon=bbox[2]-bbox[0], dLat=bbox[3]-bbox[1]; let w=512, h=Math.round(512*dLat/dLon);
+  if(h>512){w=Math.round(512*dLon/dLat); h=512;} h=Math.max(h,96); return {w,h};
+}
+function warmth(r,g,b){ // blue → 0, red → 1, read from the map's color scale
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn; if(d<12) return 0.5;
+  let h; if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4;
+  h*=60; if(h<0) h+=360; if(h>240) return h>320?1:0; return 1-h/240;
+}
+function analyze(img,w,h,mode){
+  const d=img.data, strips=[], sw=w/STEPS; let tc=0,tv=0,tn=0;
+  for(let s=0;s<STEPS;s++){
+    const x0=Math.floor(s*sw), x1=Math.floor((s+1)*sw); let n=0,c=0,v=0;
+    for(let y=0;y<h;y++) for(let x=x0;x<x1;x++){
+      const i=(y*w+x)*4; n++; if(d[i+3]<40) continue; c++;
+      v += mode==='warmth' ? warmth(d[i],d[i+1],d[i+2]) : (0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2])/255;
+    }
+    strips.push({cov:c/n, val:c?v/c:0}); tc+=c; tv+=v; tn+=n;
+  }
+  return {strips, cov:tc/tn, val:tc?tv/tc:0};
+}
+const frameVal=fr=>cfg.mode==='coverage'?fr.stats.cov:fr.stats.val;
+const frameNorm=fr=>clamp((frameVal(fr)-norm.fMin)/((norm.fMax-norm.fMin)||1),0,1);
+function fmtVal(v){ return cfg.mode==='coverage' ? `${(v*100).toFixed(1)}%` : `${Math.round(v*100)} of 100`; }
+function pctChange(v,v0){ if(Math.abs(v0)<1e-6) return ''; const p=(v-v0)/v0*100; return `${p>=0?'+':'−'}${Math.abs(p).toFixed(0)}%`; }
+
+// ---------- Loading ----------
+class GibsError extends Error{}
+async function loadOne(layer,bbox,w,h,date,mode){
+  const res=await fetch(wmsURL(layer,bbox,w,h,date),{mode:'cors'});
+  if(!res.ok) throw new GibsError(`HTTP ${res.status}`);
+  const type=res.headers.get('content-type')||'';
+  if(!type.startsWith('image')){ const t=await res.text(); throw new GibsError(t.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,180)); }
+  const bmp=await createImageBitmap(await res.blob());
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(bmp,0,0,w,h);
+  return {date, bmp, stats:analyze(x.getImageData(0,0,w,h),w,h,mode)};
+}
+
+async function loadFrames(){
+  pause(); setCompare(false);
+  els.error.textContent=''; els.status.textContent='';
+  const c={layer:els.layer.value.trim(), region:els.region.value, start:els.start.value, end:els.end.value, step:els.step.value, mode:els.mode.value,
+    label: els.preset.value==='custom' ? els.layer.value.trim() : PRESETS[els.preset.value].label};
+  if(!c.layer){ els.error.textContent='Enter a GIBS layer ID, or pick a story from the list.'; return; }
+  if(!c.start||!c.end||c.start>c.end){ els.error.textContent='Set a From date that comes before the To date.'; return; }
+  let dates=dateSeq(c.start,c.end,c.step), note='';
+  if(dates.length>MAX_FRAMES){ dates=dates.slice(0,MAX_FRAMES); note=` Showing the first ${MAX_FRAMES} dates.`; }
+  const bbox=REGIONS[c.region].bbox; const {w,h}=sizeFor(bbox);
+
+  els.loadBtn.disabled=true; els.playBtn.disabled=true; els.cmpBtn.disabled=true;
+  els.prog.hidden=false; els.prog.max=dates.length; els.prog.value=0;
+  els.emptyMsg.hidden=false; els.emptyMsg.textContent='Loading NASA maps…';
+
+  basemap=new Image(); basemap.src=wmsURL('BlueMarble_NextGeneration',bbox,w,h); // display only, never read
+
+  const results=new Array(dates.length), errors=[]; let next=0, done=0;
+  async function worker(){ while(next<dates.length){ const i=next++;
+    try{ results[i]=await loadOne(c.layer,bbox,w,h,dates[i],c.mode); }catch(e){ errors.push(e); }
+    els.prog.value=++done; els.status.textContent=`Loaded ${done} of ${dates.length} maps`; } }
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  els.prog.hidden=true; els.loadBtn.disabled=false;
+
+  const got=results.filter(Boolean);
+  if(!got.length){
+    const gibs=errors.find(e=>e instanceof GibsError);
+    els.error.textContent = gibs
+      ? `GIBS turned down the request: “${gibs.message}”. Check the layer ID (it's case-sensitive) and that the layer has data for these dates.`
+      : `Couldn't reach NASA GIBS from this page. Check your connection. If it still fails, host the file (GitHub Pages or "npx serve") instead of opening it from disk.`;
+    els.status.textContent=''; els.emptyMsg.textContent='No maps loaded yet.'; return;
+  }
+  if(got.every(f=>f.stats.cov===0)){
+    els.error.textContent='These maps came back empty. The layer probably has no data for these dates or this region. Try other dates or the whole Earth.';
+  }
+  frames=got; cfg={...c, w, h}; W=w; H=h;
+  const allStrips=frames.flatMap(f=>f.stats.strips).filter(s=>s.cov>0.002);
+  const vals=allStrips.map(s=>s.val), fv=frames.map(frameVal);
+  norm={vMin:Math.min(...vals,1), vMax:Math.max(...vals,0), covMax:Math.max(...frames.flatMap(f=>f.stats.strips.map(s=>s.cov)),1e-6), fMin:Math.min(...fv), fMax:Math.max(...fv)};
+  sparse = frames.reduce((a,f)=>a+f.stats.cov,0)/frames.length < 0.08;
+
+  els.status.textContent=`${frames.length} maps ready.${errors.length?` ${errors.length} dates had no image and were skipped.`:''}${note}`;
+  els.emptyMsg.hidden=true; els.playBtn.disabled=false; els.cmpBtn.disabled=frames.length<2;
+  frameIdx=0; step=0; visQ=[]; lastDrawnFrame=-1; lastCaption='';
+  drawFrames(0); drawPlayheads(0); updateCaption(0);
+  if(basemap) basemap.onload=()=>{ lastDrawnFrame=-1; drawFrames(frameIdx); };
+}
+
+// ---------- Audio ----------
+function initAudio(){
+  if(ctx) return;
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  master=ctx.createGain(); master.gain.value=els.vol.value/100*0.9;
+  const comp=ctx.createDynamicsCompressor(); master.connect(comp).connect(ctx.destination);
+  bus=ctx.createGain(); bus.connect(master);
+  const rev=ctx.createConvolver(); const len=ctx.sampleRate*2.4; const ir=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3);}
+  rev.buffer=ir; const wet=ctx.createGain(); wet.gain.value=0.28; bus.connect(rev).connect(wet).connect(master);
+  const nl=Math.floor(ctx.sampleRate*0.03); noiseBuf=ctx.createBuffer(1,nl,ctx.sampleRate);
+  {const d=noiseBuf.getChannelData(0); for(let i=0;i<nl;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/nl,4);}
+  drones=[-0.3,0.3].map(pan=>{
+    const o1=ctx.createOscillator(), o2=ctx.createOscillator(); o1.type='sawtooth'; o2.type='sine'; o2.detune.value=6;
+    const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=400; f.Q.value=1.5;
+    const g=ctx.createGain(); g.gain.value=0; const p=ctx.createStereoPanner(); p.pan.value=pan;
+    o1.connect(f); o2.connect(f); f.connect(g).connect(p).connect(bus); o1.start(); o2.start();
+    return {o1,o2,f,g,p};
+  });
+}
+function setDrone(d,fr,t,pan,level){
+  const v=frameNorm(fr), freq=DRONE[Math.round(v*(DRONE.length-1))];
+  d.o1.frequency.setTargetAtTime(freq,t,0.25); d.o2.frequency.setTargetAtTime(freq*2,t,0.25);
+  d.f.frequency.setTargetAtTime(220+1500*v,t,0.35); d.g.gain.setTargetAtTime(level,t,0.4); d.p.pan.setTargetAtTime(pan,t,0.2);
+}
+function playNote(t,freq,amp,pan,bright,dur){
+  const o=ctx.createOscillator(); o.type=bright?'sawtooth':'triangle'; o.frequency.value=freq;
+  const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=bright?2200:5000;
+  const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(amp,t+0.012); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  const p=ctx.createStereoPanner(); p.pan.value=pan;
+  o.connect(f).connect(g).connect(p).connect(bus); o.start(t); o.stop(t+dur+0.05);
+}
+function crackle(t,count,pan){
+  for(let i=0;i<count;i++){
+    const s=ctx.createBufferSource(); s.buffer=noiseBuf; const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1800+Math.random()*3500; f.Q.value=2.5;
+    const g=ctx.createGain(); g.gain.value=0.22; const p=ctx.createStereoPanner(); p.pan.value=clamp(pan+(Math.random()-.5)*.25,-1,1);
+    s.connect(f).connect(g).connect(p).connect(bus); s.start(t+Math.random()*stepDur());
+  }
+}
+function voice(t,fr,s,pan){
+  const st=fr.stats.strips[s]; if(st.cov<0.002) return;
+  const covN=clamp(st.cov/norm.covMax,0,1);
+  const v = cfg.mode==='coverage' ? covN : clamp((st.val-norm.vMin)/((norm.vMax-norm.vMin)||1),0,1);
+  const freq=SCALE[Math.round(v*(SCALE.length-1))];
+  const amp = cfg.mode==='coverage' ? 0.07+0.1*covN : 0.05+0.11*Math.sqrt(covN);
+  playNote(t,freq,amp,pan,v>0.62,stepDur()*1.7);
+  if(sparse) crackle(t,Math.round(covN*7),pan);
+}
+function scheduleStep(t){
+  const last=frames.length-1, xPan=-0.9+1.8*(step+0.5)/STEPS;
+  if(compare){
+    voice(t,frames[0],step,-0.85+0.15*xPan); voice(t,frames[last],step,0.85+0.15*xPan);
+    if(step===0){ setDrone(drones[0],frames[0],t,-0.8,0.06); setDrone(drones[1],frames[last],t,0.8,0.06); }
+  }else{
+    voice(t,frames[frameIdx],step,xPan);
+    if(step===0){ setDrone(drones[0],frames[frameIdx],t,-0.3,0.05); setDrone(drones[1],frames[frameIdx],t,0.3,0.05); }
+  }
+  visQ.push({t,frame:frameIdx,step});
+}
+function tick(){
+  while(nextTime < ctx.currentTime+0.12){
+    scheduleStep(nextTime); nextTime+=stepDur(); step++;
+    if(step>=STEPS){ step=0; if(!compare) frameIdx=(frameIdx+1)%frames.length; }
+  }
+}
+async function play(){
+  if(!frames.length) return; initAudio(); await ctx.resume();
+  playing=true; els.playBtn.textContent='Pause'; nextTime=ctx.currentTime+0.06; visQ=[];
+  timer=setInterval(tick,25); tick();
+}
+function pause(){
+  playing=false; els.playBtn.textContent='Play'; clearInterval(timer); timer=null;
+  if(ctx) drones.forEach(d=>d.g.gain.setTargetAtTime(0,ctx.currentTime,0.15));
+}
+function seek(i){ frameIdx=clamp(i,0,frames.length-1); step=0; visQ=[]; lastDrawnFrame=-1; drawFrames(frameIdx); drawPlayheads(0); updateCaption(frameIdx); if(playing&&ctx) nextTime=ctx.currentTime+0.05; }
+function setCompare(on){
+  compare=on; els.cmpBtn.setAttribute('aria-pressed',String(on)); views[1].el.hidden=!on; views[0].ear.hidden=!on;
+  step=0; visQ=[]; lastDrawnFrame=-1; lastCaption='';
+  if(frames.length){ drawFrames(frameIdx); drawPlayheads(0); updateCaption(frameIdx); if(playing&&ctx) nextTime=ctx.currentTime+0.05; }
+}
+
+// ---------- Drawing ----------
+function drawView(v,fr,earText){
+  v.base.width=W; v.base.height=H; v.overlay.width=W; v.overlay.height=H;
+  const x=v.base.getContext('2d'); x.fillStyle='#0A1622'; x.fillRect(0,0,W,H);
+  if(basemap&&basemap.complete&&basemap.naturalWidth&&fr.stats.cov<0.97){ x.globalAlpha=0.5; x.drawImage(basemap,0,0,W,H); x.globalAlpha=1; }
+  x.drawImage(fr.bmp,0,0,W,H);
+  if(earText) v.ear.textContent=earText;
+}
+function drawFrames(fi){
+  if(compare){ drawView(views[0],frames[0],`Left ear: ${fmtDate(frames[0].date)}`); drawView(views[1],frames[frames.length-1],`Right ear: ${fmtDate(frames[frames.length-1].date)}`); }
+  else drawView(views[0],frames[fi]);
+  lastDrawnFrame=compare?-2:fi;
+}
+function drawPlayheads(pos){
+  const sw=W/STEPS, s=Math.min(STEPS-1,Math.floor(pos)), sig=getComputedStyle(document.documentElement).getPropertyValue('--signal').trim()||'#F2B705';
+  (compare?views:[views[0]]).forEach(v=>{
+    const x=v.overlay.getContext('2d'); x.clearRect(0,0,W,H);
+    x.fillStyle='rgba(242,183,5,0.16)'; x.fillRect(s*sw,0,sw,H);
+    x.fillStyle=sig; x.fillRect(pos/STEPS*W-1.5,0,3,H);
+  });
+}
+function updateCaption(fi){
+  let d,detail;
+  if(compare){
+    const a=frames[0], b=frames[frames.length-1], va=frameVal(a), vb=frameVal(b), ch=pctChange(vb,va);
+    d=`${fmtDate(a.date)} vs ${fmtDate(b.date)}`;
+    detail=`${MODES[cfg.mode].reading}: ${fmtVal(va)} in your left ear, ${fmtVal(vb)} in your right${ch?` (${ch})`:''}.`;
+  }else{
+    const fr=frames[fi], v=frameVal(fr), ch=fi>0?pctChange(v,frameVal(frames[0])):'';
+    d=fmtDate(fr.date);
+    detail=`${cfg.label}, ${REGIONS[cfg.region].name}. ${MODES[cfg.mode].reading}: ${fmtVal(v)}${ch?` (${ch} since ${fmtDate(frames[0].date)})`:''}.`;
+  }
+  const key=d+detail; if(key===lastCaption) return; lastCaption=key;
+  els.nowDate.textContent=d; els.nowDetail.textContent=detail;
+}
+function drawSpark(pos){
+  const c=els.spark, dpr=window.devicePixelRatio||1, cw=c.clientWidth, ch=c.clientHeight;
+  if(c.width!==Math.round(cw*dpr)||c.height!==Math.round(ch*dpr)){ c.width=Math.round(cw*dpr); c.height=Math.round(ch*dpr); }
+  const x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,cw,ch);
+  if(!frames.length) return;
+  const cs=getComputedStyle(document.documentElement), ink=cs.getPropertyValue('--ink').trim(), muted=cs.getPropertyValue('--muted').trim(), sig=cs.getPropertyValue('--signal').trim();
+  const n=frames.length, px=14, py=12, X=i=>n===1?cw/2:px+i*(cw-2*px)/(n-1), Y=fr=>ch-py-frameNorm(fr)*(ch-2*py);
+  x.strokeStyle=muted; x.lineWidth=1.5; x.beginPath(); frames.forEach((f,i)=>i?x.lineTo(X(i),Y(f)):x.moveTo(X(i),Y(f))); x.stroke();
+  frames.forEach((f,i)=>{ x.fillStyle=ink; x.beginPath(); x.arc(X(i),Y(f),2.5,0,Math.PI*2); x.fill(); });
+  const mark=(i,col)=>{ x.fillStyle=col; x.beginPath(); x.arc(X(i),Y(frames[i]),5.5,0,Math.PI*2); x.fill(); };
+  if(compare){ mark(0,cs.getPropertyValue('--left').trim()); mark(n-1,cs.getPropertyValue('--right').trim()); }
+  else{
+    const i=frameIdxShown, nx=n>1?X(Math.min(n-1,i)+(i<n-1?pos/STEPS:0)):X(0);
+    x.strokeStyle=sig; x.lineWidth=2; x.beginPath(); x.moveTo(nx,py-4); x.lineTo(nx,ch-py+4); x.stroke(); mark(i,sig);
+  }
+}
+let frameIdxShown=0;
+function loop(){
+  if(frames.length){
+    let pos=0, fi=frameIdx;
+    if(playing&&ctx){
+      const now=ctx.currentTime; while(visQ.length>1&&visQ[1].t<=now) visQ.shift();
+      const cur=visQ[0];
+      if(cur&&cur.t<=now){ fi=cur.frame; pos=cur.step+clamp((now-cur.t)/stepDur(),0,1); }
+      else fi=frameIdxShown;
+    }
+    frameIdxShown=fi;
+    if(!compare&&fi!==lastDrawnFrame) drawFrames(fi);
+    if(compare&&lastDrawnFrame!==-2) drawFrames(fi);
+    drawPlayheads(pos); updateCaption(fi); drawSpark(pos);
+  }
+  requestAnimationFrame(loop);
+}
+
+// ---------- Events ----------
+els.loadBtn.addEventListener('click',loadFrames);
+els.playBtn.addEventListener('click',()=>playing?pause():play());
+els.cmpBtn.addEventListener('click',()=>setCompare(!compare));
+els.vol.addEventListener('input',()=>{ if(master) master.gain.setTargetAtTime(els.vol.value/100*0.9,ctx.currentTime,0.05); });
+function sparkSeek(clientX){ if(compare||!frames.length) return; const r=els.spark.getBoundingClientRect(), n=frames.length; seek(n===1?0:Math.round((clientX-r.left-14)/(r.width-28)*(n-1))); frameIdxShown=frameIdx; }
+els.spark.addEventListener('click',e=>sparkSeek(e.clientX));
+els.spark.addEventListener('keydown',e=>{ if(compare||!frames.length) return;
+  if(e.key==='ArrowRight'){ seek(frameIdxShown+1); frameIdxShown=frameIdx; e.preventDefault(); }
+  if(e.key==='ArrowLeft'){ seek(frameIdxShown-1); frameIdxShown=frameIdx; e.preventDefault(); } });
+document.addEventListener('keydown',e=>{ if(e.code==='Space'&&e.target===document.body&&frames.length){ e.preventDefault(); playing?pause():play(); } });
+
+// ---------- Start ----------
+els.preset.value='sst'; applyPreset('sst');
+requestAnimationFrame(loop);
+loadFrames();
+</script>
+</body>
+</html>
